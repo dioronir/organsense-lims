@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+scipy
+sqlalchemy
+requests
+pg8000
+pypdf
+matplotlib
+joblib
