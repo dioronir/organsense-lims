@@ -141,10 +141,26 @@ if "db_init_v6" not in st.session_state:
     with engine.begin() as conn:
         for stmt in ddl_statements:
             conn.execute(text(stmt))
-        try:
-            conn.execute(text("ALTER TABLE usuarios_final ADD COLUMN IF NOT EXISTS paciente_vinculado TEXT"))
-        except Exception:
-            pass
+        migracoes_cols = [
+            "ALTER TABLE usuarios_final ADD COLUMN IF NOT EXISTS paciente_vinculado TEXT",
+            "ALTER TABLE submissao_paciente_detalhada ADD COLUMN IF NOT EXISTS raca_cor TEXT",
+            "ALTER TABLE submissao_paciente_detalhada ADD COLUMN IF NOT EXISTS estado_civil TEXT",
+            "ALTER TABLE submissao_paciente_detalhada ADD COLUMN IF NOT EXISTS escolaridade TEXT",
+            "ALTER TABLE submissao_paciente_detalhada ADD COLUMN IF NOT EXISTS bioquimica_extra_json TEXT",
+            "ALTER TABLE amostras_biobanco ADD COLUMN IF NOT EXISTS qtd_criotubos INTEGER",
+            "ALTER TABLE amostras_biobanco ADD COLUMN IF NOT EXISTS volume_criotubo_ml TEXT",
+            "ALTER TABLE amostras_biobanco ADD COLUMN IF NOT EXISTS celulas_por_tubo TEXT",
+            "ALTER TABLE amostras_biobanco ADD COLUMN IF NOT EXISTS equipamento_frio TEXT",
+            "ALTER TABLE amostras_biobanco ADD COLUMN IF NOT EXISTS localizacao_criocaixa TEXT",
+            "ALTER TABLE ampolas_congeladas ADD COLUMN IF NOT EXISTS volume_criotubo_ml TEXT",
+            "ALTER TABLE ampolas_congeladas ADD COLUMN IF NOT EXISTS equipamento_frio TEXT",
+            "ALTER TABLE ampolas_congeladas ADD COLUMN IF NOT EXISTS localizacao_criocaixa TEXT",
+        ]
+        for m_sql in migracoes_cols:
+            try:
+                conn.execute(text(m_sql))
+            except Exception:
+                pass
 
     biotipos_padrao = [
         ("TN", "Fragmento Tumoral In Natura (-TN)", 0, "v1.0", '["Pureza_Tumoral_Pct", "Mutacao_KRAS_Alelo"]'),
@@ -377,68 +393,184 @@ GRUPOS_TRATAMENTO_PDAC = [
     (9, "Derivado Tiazopiridínico (P1)"),
 ]
 
+# =============================================================================
+# CALIBRAÇÃO OFICIAL DOS 57 GENES (TCGA-PAAD n=139, Ct_ref = 20.0, Offset = 10.0)
+# =============================================================================
 PAINEL_57_GENES_ASSINATURAS = {
-    "SIG_Moffitt_Basal (13 genes)": [
+    "SIG_Moffitt_Basal": [
         "KRT5", "KRT6A", "KRT14", "KRT17", "S100A2", "FAM83A", "VGLL1",
         "TNS4", "LY6D", "SCEL", "AREG", "LAMC2", "LAMA3",
     ],
-    "SIG_Moffitt_Classical (14 genes)": [
+    "SIG_Moffitt_Classical": [
         "TFF1", "TFF2", "TFF3", "LGALS4", "CTSE", "VSIG2", "AGR2",
         "REG4", "CDH17", "HNF4A", "FOXA2", "FOXA3", "SPINK4", "MUC13",
     ],
-    "SIG_Proliferation_Index (9 genes)": [
+    "SIG_Proliferation_Index": [
         "TOP2A", "MKI67", "CDC6", "CCNB1", "CCNB2", "CDK1", "AURKA", "BUB1", "MCM2",
     ],
-    "SIG_Hypoxia_Glycolysis (8 genes)": [
+    "SIG_Hypoxia_Glycolysis": [
         "VIM", "SNAI2", "ZEB1", "TWIST1", "CA9", "LDHA", "SLC2A1", "VEGFA",
     ],
-    "SIG_Stroma_Activated (13 genes)": [
+    "SIG_Stroma_Activated": [
         "FAP", "ACTA2", "COL1A1", "COL1A2", "COL3A1", "POSTN", "MMP11",
         "MMP3", "FN1", "SPARC", "THBS2", "INHBA", "WNT7A",
     ],
 }
 
-# Mediana de Ct Bruto calibrada na coorte TCGA-PAAD (n=139, Ct_GAPDH = 20.0) por assinatura
-CT_MEDIANA_POR_ASSINATURA = {
-    "SIG_Moffitt_Basal (13 genes)": "25.38",
-    "SIG_Moffitt_Classical (14 genes)": "23.14",
-    "SIG_Proliferation_Index (9 genes)": "26.39",
-    "SIG_Hypoxia_Glycolysis (8 genes)": "24.09",
-    "SIG_Stroma_Activated (13 genes)": "22.54",
+# Ct Mediano Individual de cada um dos 57 genes na coorte auditada (n=139, Ct_GAPDH=20.00)
+CT_MEDIANO_INDIVIDUAL_57_GENES = {
+    # 1. SIG_Moffitt_Basal (Mediana da Via: Ct = 25.38 | log2TPM = 4.817)
+    "KRT5": "26.42", "KRT6A": "25.85", "KRT14": "29.15", "KRT17": "21.94", "S100A2": "23.48",
+    "FAM83A": "25.12", "VGLL1": "26.18", "TNS4": "25.04", "LY6D": "26.75", "SCEL": "25.60",
+    "AREG": "24.82", "LAMC2": "22.38", "LAMA3": "24.96",
+    # 2. SIG_Moffitt_Classical (Mediana da Via: Ct = 23.14 | log2TPM = 6.925)
+    "TFF1": "20.84", "TFF2": "22.15", "TFF3": "21.62", "LGALS4": "21.30", "CTSE": "21.48",
+    "VSIG2": "23.42", "AGR2": "20.95", "REG4": "24.85", "CDH17": "24.12", "HNF4A": "24.50",
+    "FOXA2": "24.68", "FOXA3": "24.92", "SPINK4": "25.40", "MUC13": "22.75",
+    # 3. SIG_Proliferation_Index (Mediana da Via: Ct = 26.39 | log2TPM = 3.755)
+    "TOP2A": "25.42", "MKI67": "26.18", "CDC6": "26.65", "CCNB1": "25.88", "CCNB2": "26.45",
+    "CDK1": "26.32", "AURKA": "26.54", "BUB1": "26.82", "MCM2": "25.70",
+    # 4. SIG_Hypoxia_Glycolysis (Mediana da Via: Ct = 24.09 | log2TPM = 5.959)
+    "VIM": "20.45", "SNAI2": "24.62", "ZEB1": "25.30", "TWIST1": "26.40",
+    "CA9": "25.85", "LDHA": "21.60", "SLC2A1": "24.18", "VEGFA": "23.42",
+    # 5. SIG_Stroma_Activated (Mediana da Via: Ct = 22.54 | log2TPM = 7.656)
+    "FAP": "23.65", "ACTA2": "20.82", "COL1A1": "18.92", "COL1A2": "19.14", "COL3A1": "18.65",
+    "POSTN": "21.40", "MMP11": "21.85", "MMP3": "26.90", "FN1": "19.45", "SPARC": "19.88",
+    "THBS2": "21.72", "INHBA": "23.95", "WNT7A": "26.48",
 }
 
-GENES_PAINEL_HGNC = [
-    gene
-    for lista in PAINEL_57_GENES_ASSINATURAS.values()
-    for gene in lista
-]
+# Fallback por assinatura caso algum gene customizado seja consultado
+CT_MEDIANA_POR_ASSINATURA = {
+    "SIG_Moffitt_Basal": "25.38",
+    "SIG_Moffitt_Classical": "23.14",
+    "SIG_Proliferation_Index": "26.39",
+    "SIG_Hypoxia_Glycolysis": "24.09",
+    "SIG_Stroma_Activated": "22.54",
+}
+CT_PADRAO_ASSINATURA = CT_MEDIANA_POR_ASSINATURA
+
+GENES_PAINEL_HGNC = [g for lista in PAINEL_57_GENES_ASSINATURAS.values() for g in lista]
 
 LAUDOS_PDF_TESTE = {
-    "Laudo_OneShot_PDAC.pdf": [
+    "1_Individuo1_Roberto_Q1_Classical_BaixoRisco.pdf": [
         "HOSPITAL DAS CLINICAS DA UFPE - PROTOCOLO PDAC",
         "Paciente: Roberto Carlos Cavalcanti de Albuquerque",
         "Sexo Biologico: Masculino | Data de Nascimento: 14/05/1958",
         "UF: PE | Municipio: Recife | Hospital: Hospital das Clinicas da UFPE",
-        "Performance Status ECOG: 1 | Comorbidades: Diabetes recente",
-        "CA 19-9: 420.5 U/mL | CEA: 4.8 ng/mL | Albumina: 3.7 g/dL",
-        "AST / TGO: 68.4 U/L | ALT / TGP: 92.1 U/L | Bilirrubina Total: 1.4 mg/dL",
-        "Creatinina Serica: 0.95 mg/dL | Ureia: 38.0 mg/dL",
-        "Topografia Primaria: Cabeca do Pancreas | Estadiamento AJCC: IIB (Borderline)",
-        "Classificacao TNM: pT3 pN1 cM0",
-        "Ganglios Examinados: 18 | Ganglios Positivos: 2 | Margem Cirurgica: R0 | Grau Histologico: G2",
-        "Isquemia Fria: 22 min | Passagem: 3 | Criotubos Congelados: 4",
-        "Densidade Celular: 1.5x10^6 cel/mL | Viabilidade Pos-Descongelamento: 92%",
+        "Performance Status ECOG: 0 | Comorbidades: Hipertensao controlada",
+        "CA 19-9: 85.0 U/mL | CEA: 2.1 ng/mL | Albumina: 4.2 g/dL",
+        "AST / TGO: 28.0 U/L | ALT / TGP: 31.0 U/L | Bilirrubina Total: 0.8 mg/dL",
+        "Creatinina Serica: 0.85 mg/dL | Ureia: 29.0 mg/dL",
+        "Topografia Primaria: Cabeca do Pancreas | Estadiamento AJCC: IIA (Ressecavel)",
+        "Classificacao TNM: pT2 pN0 cM0",
+        "Ganglios Examinados: 22 | Ganglios Positivos: 1 | Margem Cirurgica: R0 | Grau Histologico: G1",
+        "Isquemia Fria: 18 min | Passagem: 3 | Criotubos Congelados: 4 | Viabilidade Pos-Descongelamento: 94%",
         "Concentracao Testada: 10 uM | Branco do Meio B1: 0.048 | B2: 0.050 | B3: 0.049",
-        "Ensaio F1 -> R1: 0.412 | R2: 0.405 | R3: 0.418",
-        "Ensaio F2 -> R1: 0.185 | R2: 0.179 | R3: 0.190",
-        "Ensaio F3 -> R1: 0.118 | R2: 0.112 | R3: 0.121",
-        "Ensaio F4 -> R1: 0.140 | R2: 0.135 | R3: 0.144",
-        "Ct Endogeno Referencia (GAPDH/ACTB): 20.10",
-        "Gene GATA6 -> Ct Alvo R1: 21.30 | R2: 21.25 | R3: 21.40",
-        "Gene KRT5 -> Ct Alvo R1: 27.80 | R2: 27.95 | R3: 27.85",
-        "Gene KRAS -> Ct Alvo R1: 22.40 | R2: 22.50 | R3: 22.45",
-        "Gene MKI67 -> Ct Alvo R1: 25.10 | R2: 25.20 | R3: 25.05",
-        "Gene COL1A1 -> Ct Alvo R1: 19.30 | R2: 19.45 | R3: 19.38",
+        "Ensaio F1 -> R1: 0.420 | R2: 0.415 | R3: 0.425",
+        "Ensaio F2 -> R1: 0.160 | R2: 0.155 | R3: 0.162",
+        "Ensaio F3 -> R1: 0.092 | R2: 0.088 | R3: 0.095",
+        "Ct Endogeno Referencia (GAPDH/ACTB): 20.00",
+        "Gene TFF1 -> Ct Alvo R1: 20.80 | R2: 20.75 | R3: 20.85",
+        "Gene KRT5 -> Ct Alvo R1: 28.90 | R2: 29.00 | R3: 28.85",
+        "Gene MKI67 -> Ct Alvo R1: 27.10 | R2: 27.20 | R3: 27.05",
+        "Gene CA9 -> Ct Alvo R1: 25.80 | R2: 25.90 | R3: 25.75",
+        "Gene COL1A1 -> Ct Alvo R1: 21.50 | R2: 21.60 | R3: 21.45",
+    ],
+    "2_Individuo2_MariaHelena_Q2_Classical_AltoLNR.pdf": [
+        "INSTITUTO DO CANCER DO ESTADO DE SAO PAULO (ICESP) - PROTOCOLO PDAC",
+        "Paciente: Maria Helena Vasconcelos Moura",
+        "Sexo Biologico: Feminino | Data de Nascimento: 22/11/1964",
+        "UF: SP | Municipio: Sao Paulo | Hospital: ICESP",
+        "Performance Status ECOG: 1 | Comorbidades: Diabetes mellitus de inicio recente",
+        "CA 19-9: 540.0 U/mL | CEA: 5.4 ng/mL | Albumina: 3.6 g/dL",
+        "AST / TGO: 44.0 U/L | ALT / TGP: 52.0 U/L | Bilirrubina Total: 1.3 mg/dL",
+        "Creatinina Serica: 0.90 mg/dL | Ureia: 34.0 mg/dL",
+        "Topografia Primaria: Cabeca do Pancreas | Estadiamento AJCC: IIB (Borderline)",
+        "Classificacao TNM: pT3 pN2 cM0",
+        "Ganglios Examinados: 20 | Ganglios Positivos: 8 | Margem Cirurgica: R1 | Grau Histologico: G2",
+        "Isquemia Fria: 24 min | Passagem: 3 | Criotubos Congelados: 3 | Viabilidade Pos-Descongelamento: 90%",
+        "Concentracao Testada: 10 uM | Branco do Meio B1: 0.048 | B2: 0.050 | B3: 0.049",
+        "Ensaio F1 -> R1: 0.410 | R2: 0.402 | R3: 0.415",
+        "Ensaio F2 -> R1: 0.210 | R2: 0.205 | R3: 0.215",
+        "Ensaio F3 -> R1: 0.105 | R2: 0.098 | R3: 0.108",
+        "Ct Endogeno Referencia (GAPDH/ACTB): 20.00",
+        "Gene TFF1 -> Ct Alvo R1: 21.40 | R2: 21.35 | R3: 21.45",
+        "Gene KRT5 -> Ct Alvo R1: 27.60 | R2: 27.70 | R3: 27.55",
+        "Gene MKI67 -> Ct Alvo R1: 25.40 | R2: 25.50 | R3: 25.35",
+        "Gene CA9 -> Ct Alvo R1: 24.20 | R2: 24.30 | R3: 24.15",
+        "Gene COL1A1 -> Ct Alvo R1: 19.80 | R2: 19.90 | R3: 19.75",
+    ],
+    "3_Individuo3_CarlosEduardo_Q3_Basal_Localizado_SensivelGem.pdf": [
+        "HOSPITAL DE CANCER DE PERNAMBUCO (HCP) - PROTOCOLO PDAC",
+        "Paciente: Carlos Eduardo Mendonca Braga",
+        "Sexo Biologico: Masculino | Data de Nascimento: 03/08/1969",
+        "UF: PE | Municipio: Olinda | Hospital: Hospital de Cancer de Pernambuco",
+        "Performance Status ECOG: 1 | Comorbidades: Ex-tabagista",
+        "CA 19-9: 310.0 U/mL | CEA: 4.1 ng/mL | Albumina: 3.9 g/dL",
+        "AST / TGO: 35.0 U/L | ALT / TGP: 39.0 U/L | Bilirrubina Total: 1.0 mg/dL",
+        "Creatinina Serica: 0.92 mg/dL | Ureia: 31.0 mg/dL",
+        "Topografia Primaria: Corpo do Pancreas | Estadiamento AJCC: IIA (Ressecavel)",
+        "Classificacao TNM: pT3 pN0 cM0",
+        "Ganglios Examinados: 19 | Ganglios Positivos: 1 | Margem Cirurgica: R0 | Grau Histologico: G3",
+        "Isquemia Fria: 20 min | Passagem: 2 | Criotubos Congelados: 4 | Viabilidade Pos-Descongelamento: 93%",
+        "Concentracao Testada: 10 uM | Branco do Meio B1: 0.048 | B2: 0.050 | B3: 0.049",
+        "Ensaio F1 -> R1: 0.430 | R2: 0.422 | R3: 0.435",
+        "Ensaio F2 -> R1: 0.095 | R2: 0.090 | R3: 0.098",
+        "Ensaio F3 -> R1: 0.240 | R2: 0.235 | R3: 0.245",
+        "Ct Endogeno Referencia (GAPDH/ACTB): 20.00",
+        "Gene TFF1 -> Ct Alvo R1: 26.80 | R2: 26.75 | R3: 26.85",
+        "Gene KRT5 -> Ct Alvo R1: 21.10 | R2: 21.05 | R3: 21.15",
+        "Gene MKI67 -> Ct Alvo R1: 23.20 | R2: 23.15 | R3: 23.25",
+        "Gene CA9 -> Ct Alvo R1: 22.80 | R2: 22.75 | R3: 22.85",
+        "Gene COL1A1 -> Ct Alvo R1: 19.10 | R2: 19.05 | R3: 19.15",
+    ],
+    "4_Individuo4_AnaBeatriz_Q4_Basal_UltraAltoRisco.pdf": [
+        "HOSPITAL SIRIO-LIBANES - SERVICO DE ONCOLOGIA GASTROINTESTINAL",
+        "Paciente: Ana Beatriz Gouveia Fontes",
+        "Sexo Biologico: Feminino | Data de Nascimento: 19/02/1955",
+        "UF: SP | Municipio: Sao Paulo | Hospital: Hospital Sirio-Libanes",
+        "Performance Status ECOG: 2 | Comorbidades: Perda ponderal acentuada e dor lombar",
+        "CA 19-9: 2890.0 U/mL | CEA: 14.2 ng/mL | Albumina: 3.0 g/dL",
+        "AST / TGO: 62.0 U/L | ALT / TGP: 71.0 U/L | Bilirrubina Total: 1.8 mg/dL",
+        "Creatinina Serica: 1.05 mg/dL | Ureia: 44.0 mg/dL",
+        "Topografia Primaria: Cauda do Pancreas | Estadiamento AJCC: III (Localmente Avancado)",
+        "Classificacao TNM: pT4 pN2 cM0",
+        "Ganglios Examinados: 16 | Ganglios Positivos: 9 | Margem Cirurgica: R1 | Grau Histologico: G3",
+        "Isquemia Fria: 28 min | Passagem: 4 | Criotubos Congelados: 3 | Viabilidade Pos-Descongelamento: 86%",
+        "Concentracao Testada: 10 uM | Branco do Meio B1: 0.048 | B2: 0.050 | B3: 0.049",
+        "Ensaio F1 -> R1: 0.400 | R2: 0.395 | R3: 0.405",
+        "Ensaio F2 -> R1: 0.310 | R2: 0.305 | R3: 0.315",
+        "Ensaio F3 -> R1: 0.150 | R2: 0.145 | R3: 0.155",
+        "Ct Endogeno Referencia (GAPDH/ACTB): 20.00",
+        "Gene TFF1 -> Ct Alvo R1: 27.90 | R2: 28.00 | R3: 27.85",
+        "Gene KRT5 -> Ct Alvo R1: 20.20 | R2: 20.15 | R3: 20.25",
+        "Gene MKI67 -> Ct Alvo R1: 22.10 | R2: 22.05 | R3: 22.15",
+        "Gene CA9 -> Ct Alvo R1: 21.50 | R2: 21.45 | R3: 21.55",
+        "Gene COL1A1 -> Ct Alvo R1: 18.40 | R2: 18.35 | R3: 18.45",
+    ],
+    "5_Individuo5_JoaoBatista_Colestase_RestricaoHepatica.pdf": [
+        "REAL HOSPITAL PORTUGUES DE BENEFICENCIA EM PERNAMBUCO",
+        "Paciente: Joao Batista Nogueira Lima",
+        "Sexo Biologico: Masculino | Data de Nascimento: 10/09/1949",
+        "UF: PE | Municipio: Recife | Hospital: Real Hospital Portugues",
+        "Performance Status ECOG: 2 | Comorbidades: Ictericia obstrutiva severa pre-drenagem",
+        "CA 19-9: 920.0 U/mL | CEA: 6.8 ng/mL | Albumina: 3.2 g/dL",
+        "AST / TGO: 165.0 U/L | ALT / TGP: 190.0 U/L | Bilirrubina Total: 5.4 mg/dL",
+        "Creatinina Serica: 1.75 mg/dL | Ureia: 68.0 mg/dL",
+        "Topografia Primaria: Processo Uncinado | Estadiamento AJCC: IIB (Borderline)",
+        "Classificacao TNM: pT3 pN1 cM0",
+        "Ganglios Examinados: 15 | Ganglios Positivos: 3 | Margem Cirurgica: R0 | Grau Histologico: G2",
+        "Isquemia Fria: 21 min | Passagem: 3 | Criotubos Congelados: 3 | Viabilidade Pos-Descongelamento: 89%",
+        "Concentracao Testada: 10 uM | Branco do Meio B1: 0.048 | B2: 0.050 | B3: 0.049",
+        "Ensaio F1 -> R1: 0.415 | R2: 0.410 | R3: 0.420",
+        "Ensaio F2 -> R1: 0.145 | R2: 0.140 | R3: 0.150",
+        "Ensaio F3 -> R1: 0.125 | R2: 0.120 | R3: 0.130",
+        "Ct Endogeno Referencia (GAPDH/ACTB): 20.00",
+        "Gene TFF1 -> Ct Alvo R1: 21.90 | R2: 21.85 | R3: 21.95",
+        "Gene KRT5 -> Ct Alvo R1: 26.50 | R2: 26.45 | R3: 26.55",
+        "Gene MKI67 -> Ct Alvo R1: 25.00 | R2: 24.95 | R3: 25.05",
+        "Gene CA9 -> Ct Alvo R1: 23.90 | R2: 23.85 | R3: 23.95",
+        "Gene COL1A1 -> Ct Alvo R1: 19.60 | R2: 19.55 | R3: 19.65",
     ],
 }
 
@@ -704,36 +836,28 @@ def converter_ct_para_log2tpm(ct_alvo: float, ct_ref: float = 20.0, efic: float 
 
 
 def inferir_homeostasia_somente_leitura(id_p: str) -> dict:
-    """
-    Executa a Homeostas.IA beta de forma 100% automática e somente leitura,
-    extraindo todos os dados diretamente do que foi submetido nas etapas de Paciente e Amostra.
-    """
     pct, _, pac, sub, _, _, _, _, m_auto = auditar_completude_paciente(id_p)
     idade = float(pac[2]) if pac else 65.0
     ganglios_exam = float(sub[14]) if (sub and sub[14]) else 18.0
     ganglios_pos = float(sub[15]) if (sub and sub[15] is not None) else 2.0
     margem = str(sub[17]) if (sub and sub[17] in ["R0", "R1", "R2"]) else "R0"
     grau = str(sub[18]) if (sub and sub[18] in ["G1", "G2", "G3", "G4"]) else "G2"
+    exposto_pre = "Exposto" in str(sub[21] or "")
+    fez_radio = len(json.loads(sub[23] or "[]")) > 0 if (sub and sub[23]) else False
 
     g_dcts = m_auto["genes_dct"]
     ct_ref = 20.0
 
-    def calcular_media_assinatura_log2tpm(chave_sig, dct_fallback):
-        genes_da_via = PAINEL_57_GENES_ASSINATURAS[chave_sig]
-        valores_log2 = [
-            converter_ct_para_log2tpm(ct_ref + g_dcts[g], ct_ref)
-            for g in genes_da_via
-            if g in g_dcts
-        ]
-        if valores_log2:
-            return float(np.mean(valores_log2))
-        return converter_ct_para_log2tpm(ct_ref + dct_fallback, ct_ref)
+    def media_via_57(chave_sig, dct_padrao):
+        genes_v = PAINEL_57_GENES_ASSINATURAS[chave_sig]
+        vals = [converter_ct_para_log2tpm(ct_ref + g_dcts[g], ct_ref) for g in genes_v if g in g_dcts]
+        return float(np.mean(vals)) if vals else converter_ct_para_log2tpm(ct_ref + dct_padrao, ct_ref)
 
-    sig_basal = calcular_media_assinatura_log2tpm("SIG_Moffitt_Basal (13 genes)", 5.38)
-    sig_classical = calcular_media_assinatura_log2tpm("SIG_Moffitt_Classical (14 genes)", 3.14)
-    sig_prolif = calcular_media_assinatura_log2tpm("SIG_Proliferation_Index (9 genes)", 6.39)
-    sig_hipoxia = calcular_media_assinatura_log2tpm("SIG_Hypoxia_Glycolysis (8 genes)", 4.09)
-    sig_estroma = calcular_media_assinatura_log2tpm("SIG_Stroma_Activated (13 genes)", 2.54)
+    sig_basal = media_via_57("SIG_Moffitt_Basal", 5.24)
+    sig_classical = media_via_57("SIG_Moffitt_Classical", 3.09)
+    sig_prolif = media_via_57("SIG_Proliferation_Index", 6.36)
+    sig_hipoxia = media_via_57("SIG_Hypoxia_Glycolysis", 4.06)
+    sig_estroma = media_via_57("SIG_Stroma_Activated", 2.35)
 
     fidelidade_pdo_pct = m_auto["fidelidade_pdo"]
     viab_pdo_gemcitabina = m_auto["viab_gem_pct"]
@@ -751,7 +875,14 @@ def inferir_homeostasia_somente_leitura(id_p: str) -> dict:
     letalidade_gem = max(0.0, min(100.0, 100.0 - viab_pdo_gemcitabina)) / 100.0
     letalidade_poli = max(0.0, min(100.0, 100.0 - viab_pdo_folfirinox)) / 100.0
 
-    fator_morf = (0.85 * lnr) + (0.0 if margem == "R0" else 0.22) + (0.10 if grau in ("G3", "G4") else 0.0) + (0.008 * max(0.0, idade - 65.0))
+    fator_morf = (
+        (0.85 * lnr)
+        + (0.0 if margem == "R0" else 0.22)
+        + (0.10 if grau in ("G3", "G4") else 0.0)
+        + (0.008 * max(0.0, idade - 65.0))
+        + (0.08 if exposto_pre else 0.0)
+        - (0.05 if fez_radio else 0.0)
+    )
     pred_linear = (0.29 * purist) + (0.14 * (sig_prolif - 3.75)) + (0.12 * (sig_hipoxia - 5.96)) + (0.05 * (sig_estroma - 7.66)) + fator_morf
 
     def logistic(x):
@@ -908,7 +1039,71 @@ def calcular_custos_dinamicos_paciente(id_p: str) -> pd.DataFrame:
         {"Etapa": "Grade Genética (-GN)", "Insumo": "Extração RNA + cDNA + RT-qPCR", "Qtd": n_gn, "Unit. (R$)": 62.0, "Subtotal (R$)": round(n_gn * 62.0, 2)},
     ])
 
+def renderizar_pagina_sobre():
+    st.subheader("Sobre a Plataforma OrganSense & Guia de Interpretação da Homeostas.IA")
+    st.markdown(
+        """
+        <div class="os-card" style="border-left:5px solid #0284C7;">
+            <div style="font-size:15.5px; font-weight:700; color:#0F172A; margin-bottom:6px;">
+                O Que é o Ecossistema OrganSense | Homeostas.IA beta?
+            </div>
+            <div style="font-size:13.5px; color:#334155; line-height:1.65;">
+                A <strong>OrganSense</strong> integra um biobanco translacional de <strong>Organoides Derivados de Paciente (PDOs)</strong> a uma arquitetura de Inteligência Artificial Multimodal (<strong>Homeostas.IA beta</strong>) voltada ao <strong>Adenocarcinoma Ductal Pancreático (PDAC)</strong>. O sistema cruza a clínica do paciente, o perfil genético de 57 genes por RT-qPCR e o teste empírico de fármacos diretamente no "avatar biológico" (organoide 3D) cultivado em laboratório para guiar a decisão terapêutica personalizada.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    t_p1, t_p2, t_p3, t_p4 = st.tabs([
+        "1. Parâmetros Clínicos e Cirúrgicos",
+        "2. Parâmetros Moleculares (57 Genes & PurIST)",
+        "3. Parâmetros do Organoide (Avatar 3D)",
+        "4. Como Ler os Scores de Sobrevida e Quadrantes",
+    ])
+
+    with t_p1:
+        st.markdown(
+            """
+            * **Razão Linfonodal (`LNR = Linfonodos Positivos / Examinados`):** É o preditor morfológico isolado mais potente do modelo (calibrado em $n = 139$ pacientes auditados). Um $\\text{LNR} \\le 0,15$ indica disseminação regional contida; valores $> 0,15$ sinalizam alto risco de recidiva sistêmica precoce e maior benefício de poliquimioterapia intensiva.
+            * **Margem de Ressecção (`R0` vs. `R1/R2`):** `R0` significa ausência microscópica de células tumorais nas bordas cirúrgicas; `R1` indica presença microscópica ($< 1\\text{ mm}$), exigindo intensificação adjuvante.
+            * **Filtro Farmacocinético Hepatobiliar e Renal:** Avalia Bilirrubina, AST/ALT, FA/GGT, Creatinina e ECOG para garantir que o paciente tem reserva fisiológica segura para receber regimes intensivos como mFOLFIRINOX (evitando toxicidade severa ao Irinotecano/SN-38 e Oxaliplatina).
+            """
+        )
+
+    with t_p2:
+        st.markdown(
+            """
+            * **Painel Enxuto de 57 Genes (Convertido via RT-qPCR $\\Delta C_t \\rightarrow \\log_2(\\text{TPM}+1)$):** Em vez de exigir sequenciamento de RNA completo (RNA-seq de alto custo), o modelo condensa a biologia tumoral em **5 Assinaturas Padrão-Ouro**:
+              1. **Via Moffitt Classical (14 genes — ex: *TFF1, GATA6, LGALS4, HNF4A*):** Tumores epiteliais bem diferenciados, com melhor prognóstico basal e alta sensibilidade a FOLFIRINOX.
+              2. **Via Moffitt Basal-like (13 genes — ex: *KRT5, KRT17, S100A2, FAM83A*):** Tumores de fenótipo escamoso/mesenquimal, biologicamente agressivos e frequentemente resistentes à monoterapia convencional.
+              3. **Índice de Proliferação Mitótica (9 genes — *MKI67, TOP2A, CCNB1*):** Mede a velocidade de divisão celular.
+              4. **Via de Hipóxia e Glicólise (8 genes — *CA9, LDHA, SLC2A1, VEGFA*):** Mede a privação de oxigênio e resistência metabólica.
+              5. **Estroma Desmoplásico Ativado (13 genes — *COL1A1, FAP, ACTA2*):** Mede a barreira fibrótica física ao redor do tumor que dificulta a penetração de quimioterápicos.
+            * **Score PurIST (`Basal-like` $-$ `Classical`):** Valores **negativos ($< 0$)** confirmam fenótipo **Classical**; valores **positivos ($\\ge 0$)** confirmam fenótipo **Basal-like**.
+            """
+        )
+
+    with t_p3:
+        st.markdown(
+            """
+            * **Índice de Fidelidade Fenotípica do Organoide (`-TN-EN`, %):** Mede o quanto o organoide 3D cultivado em matriz extracelular preservou a arquitetura e a viabilidade ($\\ge 80\\%$ pós-criopreservação em $-80^\\circ\\text{C} / -150^\\circ\\text{C}$) do tumor original do paciente. Quanto maior a fidelidade, maior o peso ($W_{\\text{PDO}}$) atribuído ao teste em bancada.
+            * **Letalidade / Citotoxicidade Ex Vivo (`-TN-F1..F9`, %):** Percentual de destruição das células do organoide quando expostas em laboratório a cada regime (Gencitabina, mFOLFIRINOX, Gencitabina + nab-Paclitaxel, Olaparibe, etc.) em comparação ao controle sem tratamento (`F1`).
+            """
+        )
+
+    with t_p4:
+        st.markdown(
+            """
+            * **Probabilidade de Controle de Doença RECIST (%):** Chance estimada de o tumor apresentar Resposta Completa (CR), Resposta Parcial (PR) ou Estabilidade (SD), evitando Progressão Imediata (PD).
+            * **Simulação Contrafactual de Sobrevida (12 e 24 Meses nas 3 Rotas):** Compara lado a lado a probabilidade de sobrevida do paciente em **Observação (F1)** vs. **Monoterapia com Gencitabina (F2)** vs. **Poliquimioterapia Combinada (F3)**, entregando o **Ganho Absoluto de Sobrevida em 24 meses (+%)**.
+            * **Os 4 Quadrantes de Decisão Clínica (`PurIST` $\\times$ `LNR`):**
+              * **Q1 (Classical + LNR $\\le 0,15$):** Melhor prognóstico relativo e excelente resposta adjuvante.
+              * **Q2 (Classical + LNR $> 0,15$ ou R1):** Tumor quimiossensível, porém com alto risco linfonodal — exige escalonamento para poliquimioterapia intensiva.
+              * **Q3 (Basal-like + LNR $\\le 0,15$):** Alerta de risco molecular oculto mesmo em cirurgia limpa — evitar monoterapia isolada.
+              * **Q4 (Basal-like + LNR $> 0,15$):** Ultra-alto risco clínico e biológico — guiar conduta diretamente pelo fármaco vencedor no organoide PDO.
+            """
+        )
 # -----------------------------------------------------------------------------
 # TELA DE LOGIN MINIMALISTA (GMAIL OBRIGATÓRIO + 5 PERFIS)
 # -----------------------------------------------------------------------------
@@ -929,7 +1124,7 @@ if not st.session_state.get("logged_in"):
 
         metodo_escolhido = st.selectbox(
             "Acesso:",
-            ["Login", "Credenciamento"],
+            ["Login", "Credenciamento", "Sobre a Plataforma"],
             index=0 if st.session_state.metodo_inicial == "Login" else 1,
         )
         if metodo_escolhido != st.session_state.metodo_inicial:
@@ -1011,6 +1206,8 @@ if not st.session_state.get("logged_in"):
                         st.session_state.auth_notice = f"Conta criada! Credenciais enviadas para {novo_gmail}."
                         st.session_state.metodo_inicial = "Login"
                         st.rerun()
+    
+        
 # =============================================================================
 # BLOCO 3/3: ROTEAMENTO POR PERFIL, ACOMPANHAMENTO/CHAT E IA SOMENTE LEITURA
 # =============================================================================
@@ -1023,13 +1220,13 @@ else:
     # - Operador: vê "Paciente", "Amostras", "Acompanhamento" e "Homeostas.IA"
     # - Administrador: acesso total + "Governança"
     if perfil_atual in ("Paciente", "Parente"):
-        modulos_curtos = ["Acompanhamento"]
+        modulos_curtos = ["Acompanhamento", "Sobre"]
     elif perfil_atual == "Médico":
-        modulos_curtos = ["Paciente", "Acompanhamento", "Homeostas.IA"]
+        modulos_curtos = ["Paciente", "Acompanhamento", "Homeostas.IA", "Sobre"]
     elif perfil_atual == "Operador":
-        modulos_curtos = ["Paciente", "Amostras", "Acompanhamento", "Homeostas.IA"]
+        modulos_curtos = ["Paciente", "Amostras", "Acompanhamento", "Homeostas.IA", "Sobre"]
     else:  # Administrador
-        modulos_curtos = ["Paciente", "Amostras", "Acompanhamento", "Homeostas.IA", "Governança"]
+        modulos_curtos = ["Paciente", "Amostras", "Acompanhamento", "Homeostas.IA", "Governança", "Sobre"]
 
     if st.session_state.get("nav_curto") not in modulos_curtos:
         st.session_state.nav_curto = modulos_curtos[0]
@@ -1158,16 +1355,23 @@ else:
             "draft_pac",
             {
                 "nome": dp.get("nome", ""), "sexo": dp.get("sexo", "Masculino"), "dt_nasc": date(1962, 5, 14),
+                "raca_cor": "Parda", "estado_civil": "Casado(a) / União Estável", "escolaridade": "Ensino Médio Completo",
                 "uf": dp.get("uf", "PE"), "municipio": dp.get("municipio", "Recife"), "hospital": dp.get("hospital", ""),
                 "ecog": dp.get("ecog", "1"), "comorbidades": dp.get("comorbidades", "Nenhuma"),
                 "ca19_9": dp.get("ca19_9", "145.0"), "cea": dp.get("cea", "3.2"), "ast": dp.get("ast_tgo", "34.0"),
-                "alt": dp.get("alt_tgp", "41.0"), "bil": dp.get("bilirrubina", "1.1"), "cre": dp.get("creatinina", "0.9"),
-                "ure": dp.get("ureia", "32.0"), "alb": dp.get("albumina", "3.8"), "topografia": "Cabeça do Pâncreas",
-                "ajcc": "IIB (Borderline)", "t": "T3", "n": "N1", "m": "M0",
+                "alt": dp.get("alt_tgp", "41.0"), "bil": dp.get("bilirrubina", "1.1"), "bil_dir": "0.7",
+                "fa": "185.0", "ggt": "210.0", "amilase": "68.0", "lipase": "95.0",
+                "glicemia": "112.0", "hba1c": "6.1", "ldh": "240.0", "pcr": "1.8",
+                "hemoglobina": "12.4", "leucocitos": "7200", "plaquetas": "235000", "inr": "1.05",
+                "cre": dp.get("creatinina", "0.9"), "ure": dp.get("ureia", "32.0"), "alb": dp.get("albumina", "3.8"),
+                "topografia": "Cabeça do Pâncreas", "ajcc": "IIB (Borderline)", "t": "T3", "n": "N1", "m": "M0",
                 "g_exam": int(dp["ganglios_examinados"]) if str(dp.get("ganglios_examinados", "")).isdigit() else 18,
                 "g_pos": int(dp["ganglios_positivos"]) if str(dp.get("ganglios_positivos", "")).isdigit() else 2,
                 "margem": dp.get("margem_cirurgica", "R0"), "grau": dp.get("grau_histologico", "G2"),
-                "ipn": "Presente", "ilv": "Presente", "status_trat": "Virgem de Tratamento (Upfront)",
+                "ipn": "Presente", "ilv": "Presente",
+                "status_trat": "Virgem de Tratamento no Momento da Coleta (Baseline Naive)",
+                "teve_neoadjuvancia_pre_coleta": "Não",
+                "total_ciclos_pre_coleta": 0,
             },
         )
         dr = st.session_state.draft_pac
@@ -1175,14 +1379,23 @@ else:
         if st.session_state.sub_aba_pac == "1. Demografia":
             c1, c2 = st.columns(2)
             dr["nome"] = c1.text_input("Nome do Paciente", value=dr["nome"]).strip()
-            dr["hospital"] = c2.text_input("Hospital", value=dr["hospital"]).strip()
+            dr["hospital"] = c2.text_input("Hospital / Serviço Cirúrgico", value=dr["hospital"]).strip()
             c3, c4, c5, c6 = st.columns(4)
-            dr["sexo"] = c3.selectbox("Sexo", ["Masculino", "Feminino"], index=0 if dr["sexo"] == "Masculino" else 1)
+            dr["sexo"] = c3.selectbox("Sexo Biológico", ["Masculino", "Feminino"], index=0 if dr["sexo"] == "Masculino" else 1)
             dr["dt_nasc"] = c4.date_input("Nascimento", value=dr["dt_nasc"], min_value=date(1900, 1, 1), max_value=date.today())
             ufs = get_ufs()
             dr["uf"] = c5.selectbox("UF", ufs, index=ufs.index(dr["uf"]) if dr["uf"] in ufs else 0)
             cids = get_cidades(dr["uf"])
             dr["municipio"] = c6.selectbox("Município", cids, index=cids.index(dr["municipio"]) if dr["municipio"] in cids else 0)
+
+            d1, d2, d3 = st.columns(3)
+            op_raca = ["Branca", "Parda", "Preta", "Amarela", "Indígena", "Não Informada"]
+            op_civil = ["Solteiro(a)", "Casado(a) / União Estável", "Divorciado(a)", "Viúvo(a)", "Não Informado"]
+            op_esc = ["Sem Escolaridade", "Ensino Fundamental", "Ensino Médio Completo", "Ensino Superior", "Pós-Graduação", "Não Informada"]
+            dr["raca_cor"] = d1.selectbox("Cor / Raça (IBGE)", op_raca, index=op_raca.index(dr.get("raca_cor", "Parda")) if dr.get("raca_cor") in op_raca else 1)
+            dr["estado_civil"] = d2.selectbox("Estado Civil", op_civil, index=op_civil.index(dr.get("estado_civil", "Casado(a) / União Estável")) if dr.get("estado_civil") in op_civil else 1)
+            dr["escolaridade"] = d3.selectbox("Escolaridade", op_esc, index=op_esc.index(dr.get("escolaridade", "Ensino Médio Completo")) if dr.get("escolaridade") in op_esc else 2)
+
             if st.button("Avançar ->", type="primary"):
                 st.session_state.sub_aba_pac = "2. Clínica"
                 st.rerun()
@@ -1190,23 +1403,44 @@ else:
         elif st.session_state.sub_aba_pac == "2. Clínica":
             c1, c2 = st.columns([1, 3])
             op_ecog = ["0", "1", "2", "3", "4"]
-            dr["ecog"] = c1.selectbox("ECOG", op_ecog, index=op_ecog.index(str(dr["ecog"])) if str(dr["ecog"]) in op_ecog else 1)
-            dr["comorbidades"] = c2.text_input("Comorbidades", value=dr["comorbidades"])
+            dr["ecog"] = c1.selectbox("ECOG Performance Status", op_ecog, index=op_ecog.index(str(dr["ecog"])) if str(dr["ecog"]) in op_ecog else 1)
+            dr["comorbidades"] = c2.text_input("Comorbidades e Sintomas (Diabetes, Icterícia, Perda Ponderal, Tabagismo/Etilismo)", value=dr["comorbidades"])
             if st.button("Avançar ->", type="primary"):
                 st.session_state.sub_aba_pac = "3. Bioquímica"
                 st.rerun()
 
         elif st.session_state.sub_aba_pac == "3. Bioquímica":
+            st.caption("Marcadores Tumorais, Perfil Hepatobiliar/Pancreático, Função Renal, Glicemia e Hematologia")
             b1, b2, b3, b4 = st.columns(4)
             dr["ca19_9"] = norm_num(b1.text_input("CA 19-9 (U/mL)", value=dr["ca19_9"]))
             dr["cea"] = norm_num(b2.text_input("CEA (ng/mL)", value=dr["cea"]))
             dr["bil"] = norm_num(b3.text_input("Bilirrubina Total (mg/dL)", value=dr["bil"]))
-            dr["alb"] = norm_num(b4.text_input("Albumina (g/dL)", value=dr["alb"]))
+            dr["bil_dir"] = norm_num(b4.text_input("Bilirrubina Direta (mg/dL)", value=dr.get("bil_dir", "0.7")))
+
             b5, b6, b7, b8 = st.columns(4)
             dr["ast"] = norm_num(b5.text_input("AST / TGO (U/L)", value=dr["ast"]))
             dr["alt"] = norm_num(b6.text_input("ALT / TGP (U/L)", value=dr["alt"]))
-            dr["cre"] = norm_num(b7.text_input("Creatinina (mg/dL)", value=dr["cre"]))
-            dr["ure"] = norm_num(b8.text_input("Ureia (mg/dL)", value=dr["ure"]))
+            dr["fa"] = norm_num(b7.text_input("Fosfatase Alcalina - FA (U/L)", value=dr.get("fa", "185.0")))
+            dr["ggt"] = norm_num(b8.text_input("Gama-GT - GGT (U/L)", value=dr.get("ggt", "210.0")))
+
+            b9, b10, b11, b12 = st.columns(4)
+            dr["alb"] = norm_num(b9.text_input("Albumina Sérica (g/dL)", value=dr["alb"]))
+            dr["cre"] = norm_num(b10.text_input("Creatinina (mg/dL)", value=dr["cre"]))
+            dr["ure"] = norm_num(b11.text_input("Ureia (mg/dL)", value=dr["ure"]))
+            dr["ldh"] = norm_num(b12.text_input("LDH (U/L)", value=dr.get("ldh", "240.0")))
+
+            b13, b14, b15, b16 = st.columns(4)
+            dr["amilase"] = norm_num(b13.text_input("Amilase (U/L)", value=dr.get("amilase", "68.0")))
+            dr["lipase"] = norm_num(b14.text_input("Lipase (U/L)", value=dr.get("lipase", "95.0")))
+            dr["glicemia"] = norm_num(b15.text_input("Glicemia de Jejum (mg/dL)", value=dr.get("glicemia", "112.0")))
+            dr["hba1c"] = norm_num(b16.text_input("Hemoglobina Glicada HbA1c (%)", value=dr.get("hba1c", "6.1")))
+
+            b17, b18, b19, b20 = st.columns(4)
+            dr["hemoglobina"] = norm_num(b17.text_input("Hemoglobina (g/dL)", value=dr.get("hemoglobina", "12.4")))
+            dr["leucocitos"] = norm_num(b18.text_input("Leucócitos (/mm³)", value=dr.get("leucocitos", "7200")))
+            dr["plaquetas"] = norm_num(b19.text_input("Plaquetas (/mm³)", value=dr.get("plaquetas", "235000")))
+            dr["pcr"] = norm_num(b20.text_input("Proteína C Reativa - PCR (mg/dL)", value=dr.get("pcr", "1.8")))
+
             if st.button("Avançar ->", type="primary"):
                 st.session_state.sub_aba_pac = "4. Anatomia"
                 st.rerun()
@@ -1217,7 +1451,7 @@ else:
             op_ajcc = ["IA (Ressecável)", "IB (Ressecável)", "IIA (Ressecável)", "IIB (Borderline)", "III (Localmente Avançado)", "IV (Metastático)"]
             dr["topografia"] = a1.selectbox("Topografia", op_top, index=op_top.index(dr["topografia"]) if dr["topografia"] in op_top else 0)
             dr["ajcc"] = a2.selectbox("AJCC (8ª Ed.)", op_ajcc, index=op_ajcc.index(dr["ajcc"]) if dr["ajcc"] in op_ajcc else 3)
-            dr["grau"] = a3.selectbox("Grau", ["G1", "G2", "G3", "G4"], index=["G1", "G2", "G3", "G4"].index(dr["grau"]) if dr["grau"] in ["G1", "G2", "G3", "G4"] else 1)
+            dr["grau"] = a3.selectbox("Grau Histológico", ["G1", "G2", "G3", "G4"], index=["G1", "G2", "G3", "G4"].index(dr["grau"]) if dr["grau"] in ["G1", "G2", "G3", "G4"] else 1)
             t1, t2, t3, t4, t5, t6 = st.columns(6)
             dr["t"] = t1.selectbox("T", ["T1", "T2", "T3", "T4"], index=["T1", "T2", "T3", "T4"].index(dr["t"]))
             dr["n"] = t2.selectbox("N", ["N0", "N1", "N2"], index=["N0", "N1", "N2"].index(dr["n"]))
@@ -1230,17 +1464,35 @@ else:
                 st.rerun()
 
         elif st.session_state.sub_aba_pac == "5. Tratamento":
-            dr["status_trat"] = st.selectbox(
-                "Contexto Terapêutico",
-                ["Virgem de Tratamento (Upfront)", "Pós-Neoadjuvância", "Paliativo / Biópsia"],
+            ct1, ct2, ct3 = st.columns([2, 1, 1])
+            dr["status_trat"] = ct1.selectbox(
+                "Status Terapêutico no Momento da Coleta da Amostra",
+                [
+                    "Virgem de Tratamento no Momento da Coleta (Baseline Naive)",
+                    "Exposto Previamente à Coleta (Pós-Neoadjuvância)",
+                    "Recidiva / Linha Paliativa",
+                ],
             )
+            dr["teve_neoadjuvancia_pre_coleta"] = ct2.selectbox(
+                "Exposto a Quimio Antes da Coleta?",
+                ["Não", "Sim (Neoadjuvante)"],
+                index=1 if "Exposto" in dr["status_trat"] else 0,
+            )
+            dr["total_ciclos_pre_coleta"] = ct3.number_input(
+                "Nº de Ciclos Recebidos Pré-Coleta",
+                min_value=0,
+                max_value=40,
+                value=int(dr.get("total_ciclos_pre_coleta", 0)),
+            )
+
             df_trat_init = pd.DataFrame([
-                {"Modalidade": "Ressecção", "Protocolo": "Whipple (Gastroduodenopancreatectomia)", "Aplicado": True, "Detalhe": "R0"},
-                {"Modalidade": "Ressecção", "Protocolo": "Pancreatectomia Corpo-Caudal", "Aplicado": False, "Detalhe": ""},
-                {"Modalidade": "Quimioterapia", "Protocolo": "mFOLFIRINOX", "Aplicado": False, "Detalhe": ""},
-                {"Modalidade": "Quimioterapia", "Protocolo": "Gencitabina + nab-Paclitaxel", "Aplicado": False, "Detalhe": ""},
-                {"Modalidade": "Quimioterapia", "Protocolo": "Gencitabina Monoterapia", "Aplicado": False, "Detalhe": ""},
-                {"Modalidade": "Radioterapia", "Protocolo": "SBRT / IMRT", "Aplicado": False, "Detalhe": ""},
+                {"Modalidade": "Ressecção", "Protocolo": "Whipple (Gastroduodenopancreatectomia)", "Aplicado": True, "Momento vs. Coleta": "No Ato da Coleta (Dia 0)", "Nº de Ciclos / Frações": 1, "Dose / Observação": "Margem R0"},
+                {"Modalidade": "Ressecção", "Protocolo": "Pancreatectomia Corpo-Caudal (Distal)", "Aplicado": False, "Momento vs. Coleta": "No Ato da Coleta (Dia 0)", "Nº de Ciclos / Frações": 0, "Dose / Observação": ""},
+                {"Modalidade": "Quimioterapia", "Protocolo": "mFOLFIRINOX (5-FU + Irinotecano + Oxaliplatina)", "Aplicado": False, "Momento vs. Coleta": "Pós-Coleta (Adjuvante)", "Nº de Ciclos / Frações": 6, "Dose / Observação": ""},
+                {"Modalidade": "Quimioterapia", "Protocolo": "Gencitabina + nab-Paclitaxel", "Aplicado": False, "Momento vs. Coleta": "Pré-Coleta (Neoadjuvante)", "Nº de Ciclos / Frações": 4, "Dose / Observação": ""},
+                {"Modalidade": "Quimioterapia", "Protocolo": "Gencitabina Monoterapia", "Aplicado": False, "Momento vs. Coleta": "Pós-Coleta (Adjuvante)", "Nº de Ciclos / Frações": 6, "Dose / Observação": ""},
+                {"Modalidade": "Quimioterapia", "Protocolo": "5-FU / Capecitabina", "Aplicado": False, "Momento vs. Coleta": "Pós-Coleta (Adjuvante)", "Nº de Ciclos / Frações": 6, "Dose / Observação": ""},
+                {"Modalidade": "Radioterapia", "Protocolo": "SBRT / IMRT / 3D-CRT", "Aplicado": False, "Momento vs. Coleta": "Pós-Coleta (Adjuvante)", "Nº de Ciclos / Frações": 25, "Dose / Observação": "50.4 Gy"},
             ])
             df_trat_edit = st.data_editor(df_trat_init, use_container_width=True, hide_index=True, key="grid_trat_pac")
 
@@ -1254,9 +1506,18 @@ else:
                     idade_c = hoje.year - dn.year - ((hoje.month, hoje.day) < (dn.month, dn.day))
                     lnr_f = round(dr["g_pos"] / max(1, dr["g_exam"]), 3)
                     aplicados = df_trat_edit[df_trat_edit["Aplicado"] == True]
-                    qm_l = aplicados[aplicados["Modalidade"] == "Quimioterapia"]["Protocolo"].tolist()
-                    rd_l = aplicados[aplicados["Modalidade"] == "Radioterapia"]["Protocolo"].tolist()
+                    qm_l = [f"{r['Protocolo']} ({r['Momento vs. Coleta']}, {r['Nº de Ciclos / Frações']} ciclos)" for _, r in aplicados[aplicados["Modalidade"] == "Quimioterapia"].iterrows()]
+                    rd_l = [f"{r['Protocolo']} ({r['Nº de Ciclos / Frações']} frações)" for _, r in aplicados[aplicados["Modalidade"] == "Radioterapia"].iterrows()]
                     rs_l = aplicados[aplicados["Modalidade"] == "Ressecção"]["Protocolo"].tolist()
+
+                    bioq_extra = {
+                        "bil_direta": dr.get("bil_dir"), "fa": dr.get("fa"), "ggt": dr.get("ggt"),
+                        "amilase": dr.get("amilase"), "lipase": dr.get("lipase"), "glicemia": dr.get("glicemia"),
+                        "hba1c": dr.get("hba1c"), "ldh": dr.get("ldh"), "pcr": dr.get("pcr"),
+                        "hemoglobina": dr.get("hemoglobina"), "leucocitos": dr.get("leucocitos"),
+                        "plaquetas": dr.get("plaquetas"), "ciclos_pre_coleta": dr.get("total_ciclos_pre_coleta"),
+                        "neoadjuvancia_pre_coleta": dr.get("teve_neoadjuvancia_pre_coleta"),
+                    }
 
                     run_sql(
                         "INSERT INTO pacientes_final VALUES (:id, :n, :i, :s, :na, :uf, :c, :rc, :h, 'Recebido')",
@@ -1267,10 +1528,14 @@ else:
                         },
                     )
                     run_sql(
-                        """INSERT INTO submissao_paciente_detalhada VALUES 
-                           (:id, :ecog, :com, :ca19, :cea, :ast, :alt, :bil, :cre, :ure, :alb,
-                            :top, :ajcc, :tnm, :gex, :gpo, :lnr, :mg, :gr, :ipn, :ilv,
-                            :st_t, :qm, :rd, :rs, :dt, :resp)""",
+                        """INSERT INTO submissao_paciente_detalhada 
+                           (id_p, ecog, comorbidades, ca19_9, cea, ast_tgo, alt_tgp, bilirrubina, creatinina, ureia, albumina,
+                            topografia, estadiamento_ajcc, tnm, ganglios_exam, ganglios_pos, lnr, margem, grau_hist, invasao_perineural, invasao_linfovasc,
+                            status_tratamento, regime_quimio, modalidade_radio, tipo_resseccao, data_recebimento, responsavel,
+                            raca_cor, estado_civil, escolaridade, bioquimica_extra_json)
+                           VALUES (:id, :ecog, :com, :ca19, :cea, :ast, :alt, :bil, :cre, :ure, :alb,
+                                   :top, :ajcc, :tnm, :gex, :gpo, :lnr, :mg, :gr, :ipn, :ilv,
+                                   :st_t, :qm, :rd, :rs, :dt, :resp, :rcor, :eciv, :esc, :bex)""",
                         {
                             "id": id_gerado, "ecog": dr["ecog"], "com": dr["comorbidades"],
                             "ca19": dr["ca19_9"], "cea": dr["cea"], "ast": dr["ast"], "alt": dr["alt"],
@@ -1281,6 +1546,8 @@ else:
                             "st_t": dr["status_trat"], "qm": json.dumps(qm_l, ensure_ascii=False),
                             "rd": json.dumps(rd_l, ensure_ascii=False), "rs": json.dumps(rs_l, ensure_ascii=False),
                             "dt": datetime.now().strftime("%d/%m/%Y %H:%M:%S"), "resp": st.session_state.username,
+                            "rcor": dr["raca_cor"], "eciv": dr["estado_civil"], "esc": dr["escolaridade"],
+                            "bex": json.dumps(bioq_extra, ensure_ascii=False),
                         },
                     )
                     run_sql(
@@ -1288,7 +1555,6 @@ else:
                         {"id": id_gerado, "mu": st.session_state.username, "me": st.session_state.get("email_logado", ""), "dt": datetime.now().strftime("%d/%m/%Y %H:%M")},
                     )
                     st.session_state.id_ativo = id_gerado
-                    # Médico vai direto para "Acompanhamento"; Operador vai para "Amostras"
                     st.session_state.nav_curto = "Acompanhamento" if perfil_atual == "Médico" else "Amostras"
                     st.rerun()
 
@@ -1447,17 +1713,69 @@ else:
                 st.markdown("---")
 
                 if st.session_state.aba_amostra == "1. Recebimento":
+                    st.caption("Indexação de Amostras Primárias e Alíquotas de Biobanco: Volume por Criotubo, Células/Tubo, Criocaixa e Refrigerador (-20°C, -80°C ou -150°C)")
                     df_rec_init = pd.DataFrame([
-                        {"Biotipo": "Fragmento Tecidual (Tumor)", "Prefixo": "T", "Qtd": 2, "Isquemia (min)": int(dp_am.get("isquemia_min", 22)) if str(dp_am.get("isquemia_min", "")).isdigit() else 22, "Meio": "RPMI 1640 (4°C)"},
-                        {"Biotipo": "Sangue Total", "Prefixo": "ST", "Qtd": 1, "Isquemia (min)": 15, "Meio": "EDTA"},
-                        {"Biotipo": "Plasma", "Prefixo": "P", "Qtd": 2, "Isquemia (min)": 15, "Meio": "EDTA Centrifugado"},
-                        {"Biotipo": "Soro", "Prefixo": "S", "Qtd": 1, "Isquemia (min)": 15, "Meio": "Gel Separador"},
-                        {"Biotipo": "PBMC", "Prefixo": "PBMC", "Qtd": 1, "Isquemia (min)": 20, "Meio": "Heparina / Ficoll"},
+                        {
+                            "Biotipo": "Fragmento Tecidual (Tumor)", "Prefixo": "T", "Qtd Criotubos": 2,
+                            "Volume/Tubo": "1.0 mL (ou ~150 mg)", "Células / Criotubo": "1.5x10^6 cél/mL (ou fragmento)",
+                            "Isquemia (min)": int(dp_am.get("isquemia_min", 22)) if str(dp_am.get("isquemia_min", "")).isdigit() else 22,
+                            "Meio / Solução": "RPMI 1640 + 10% SFB (4°C)",
+                            "Refrigerador": "Ultrafreezer -80°C / N2 (-150°C)",
+                            "Criocaixa (Rack/Caixa/Pos)": "Rack-A1 / Caixa-T01 / Pos A1-A2",
+                        },
+                        {
+                            "Biotipo": "PBMC (Células Mononucleares)", "Prefixo": "PBMC", "Qtd Criotubos": 2,
+                            "Volume/Tubo": "1.0 mL", "Células / Criotubo": "5.0x10^6 cél/tubo (Ficoll + 10% DMSO)",
+                            "Isquemia (min)": 20, "Meio / Solução": "SFB 90% + DMSO 10% (Mr. Frosty)",
+                            "Refrigerador": "Criogenia -150°C (ou -80°C)",
+                            "Criocaixa (Rack/Caixa/Pos)": "Rack-B1 / Caixa-IM01 / Pos B1-B2",
+                        },
+                        {
+                            "Biotipo": "Plasma", "Prefixo": "P", "Qtd Criotubos": 3,
+                            "Volume/Tubo": "0.5 mL (500 µL)", "Células / Criotubo": "Acelular (Sobrenadante cfDNA)",
+                            "Isquemia (min)": 15, "Meio / Solução": "Tubo EDTA Centrifugado 2x",
+                            "Refrigerador": "Ultrafreezer -80°C",
+                            "Criocaixa (Rack/Caixa/Pos)": "Rack-C1 / Caixa-PL01 / Pos C1-C3",
+                        },
+                        {
+                            "Biotipo": "Soro", "Prefixo": "S", "Qtd Criotubos": 2,
+                            "Volume/Tubo": "0.5 mL (500 µL)", "Células / Criotubo": "Acelular (Proteômica/CA19-9)",
+                            "Isquemia (min)": 15, "Meio / Solução": "Tubo Gel Separador",
+                            "Refrigerador": "Ultrafreezer -80°C (ou -20°C)",
+                            "Criocaixa (Rack/Caixa/Pos)": "Rack-C1 / Caixa-SR01 / Pos D1-D2",
+                        },
+                        {
+                            "Biotipo": "Sangue Total", "Prefixo": "ST", "Qtd Criotubos": 1,
+                            "Volume/Tubo": "1.5 mL", "Células / Criotubo": "Sangue Total Homogeneizado",
+                            "Isquemia (min)": 15, "Meio / Solução": "Tubo EDTA (Roxo)",
+                            "Refrigerador": "Ultrafreezer -80°C (ou -20°C DNA)",
+                            "Criocaixa (Rack/Caixa/Pos)": "Rack-D1 / Caixa-ST01 / Pos E1",
+                        },
                     ])
-                    df_rec_edit = st.data_editor(df_rec_init, use_container_width=True, hide_index=True, key="grid_rec_all")
-                    if st.button("Registrar Lote de Amostras", type="primary"):
+                    df_rec_edit = st.data_editor(
+                        df_rec_init,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Refrigerador": st.column_config.SelectboxColumn(
+                                "Refrigerador",
+                                options=[
+                                    "Freezer -20°C",
+                                    "Ultrafreezer -80°C",
+                                    "Criogenia -150°C / N2 Líquido",
+                                    "Ultrafreezer -80°C / N2 (-150°C)",
+                                    "Criogenia -150°C (ou -80°C)",
+                                    "Ultrafreezer -80°C (ou -20°C)",
+                                    "Ultrafreezer -80°C (ou -20°C DNA)",
+                                    "Processamento a Fresco (4°C)",
+                                ],
+                            )
+                        },
+                        key="grid_rec_all",
+                    )
+                    if st.button("Indexar e Registrar Lote de Criotubos no Biobanco", type="primary"):
                         for _, row_r in df_rec_edit.iterrows():
-                            qtd = int(row_r["Qtd"] or 0)
+                            qtd = int(row_r["Qtd Criotubos"] or 0)
                             pref = str(row_r["Prefixo"])
                             if qtd > 0:
                                 ex = fetch_all("SELECT numero_tubo FROM amostras_biobanco WHERE id_p = :id AND prefixo_tipo = :pr", {"id": id_b, "pr": pref})
@@ -1465,32 +1783,86 @@ else:
                                 for i_t in range(1, qtd + 1):
                                     nt = ult + i_t
                                     run_sql(
-                                        "INSERT INTO amostras_biobanco VALUES (:ida, :idp, :bio, :pr, :num, '1 un', :isq, :meio, 'Recebida', :resp, :dt)",
-                                        {"ida": f"{id_b}-{pref}{nt}", "idp": id_b, "bio": row_r["Biotipo"], "pr": pref, "num": nt, "isq": int(row_r["Isquemia (min)"] or 20), "meio": row_r["Meio"], "resp": st.session_state.username, "dt": datetime.now().strftime("%d/%m/%Y %H:%M")},
+                                        """INSERT INTO amostras_biobanco 
+                                           (id_amostra, id_p, biotipo, prefixo_tipo, numero_tubo, volume_ou_peso, isquemia_min, meio_transporte, status_amostra, responsavel, data_coleta,
+                                            qtd_criotubos, volume_criotubo_ml, celulas_por_tubo, equipamento_frio, localizacao_criocaixa)
+                                           VALUES (:ida, :idp, :bio, :pr, :num, :vol, :isq, :meio, 'Armazenada', :resp, :dt, :qcr, :vml, :cel, :eqf, :cx)""",
+                                        {
+                                            "ida": f"{id_b}-{pref}{nt}", "idp": id_b, "bio": row_r["Biotipo"], "pr": pref, "num": nt,
+                                            "vol": str(row_r["Volume/Tubo"]), "isq": int(row_r["Isquemia (min)"] or 20),
+                                            "meio": str(row_r["Meio / Solução"]), "resp": st.session_state.username,
+                                            "dt": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                            "qcr": 1, "vml": str(row_r["Volume/Tubo"]), "cel": str(row_r["Células / Criotubo"]),
+                                            "eqf": str(row_r["Refrigerador"]), "cx": f"{row_r['Criocaixa (Rack/Caixa/Pos)']} [Tubo {nt}]",
+                                        },
                                     )
+                        st.success("Criotubos indexados com volume, concentração celular, criocaixa e refrigerador!")
                         st.rerun()
-                    st.dataframe(fetch_df("SELECT id_amostra, biotipo, numero_tubo, isquemia_min, meio_transporte FROM amostras_biobanco WHERE id_p = :id ORDER BY prefixo_tipo, numero_tubo", {"id": id_b}), use_container_width=True, hide_index=True)
+
+                    st.dataframe(
+                        fetch_df(
+                            'SELECT id_amostra AS "ID Criotubo", biotipo AS "Biotipo", volume_criotubo_ml AS "Volume", celulas_por_tubo AS "Células/Tubo", equipamento_frio AS "Refrigerador", localizacao_criocaixa AS "Criocaixa", isquemia_min AS "Isquemia (min)" FROM amostras_biobanco WHERE id_p = :id ORDER BY prefixo_tipo, numero_tubo',
+                            {"id": id_b},
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
                 elif st.session_state.aba_amostra == "2. Cultivo & Crio":
-                    tumores_tn = fetch_all("SELECT id_amostra FROM amostras_biobanco WHERE id_p = :id AND prefixo_tipo = 'T' ORDER BY numero_tubo", {"id": id_b})
-                    lista_tn = [r[0] for r in tumores_tn] if tumores_tn else [f"{id_b}-T1"]
-                    tn_sel = st.selectbox("Amostra (-TN)", lista_tn)
+                    st.caption("Cultivo e Criopreservação Celular Viável: Aplicável a Fragmentos Tumorais (-TN -> Organoides PDO) e a PBMC (-PBMCN -> Expansão/Co-cultura Imune)")
+                    amostras_viaveis = fetch_all(
+                        "SELECT id_amostra, prefixo_tipo FROM amostras_biobanco WHERE id_p = :id AND prefixo_tipo IN ('T', 'PBMC') ORDER BY prefixo_tipo, numero_tubo",
+                        {"id": id_b},
+                    )
+                    lista_tn = [r[0] for r in amostras_viaveis] if amostras_viaveis else [f"{id_b}-T1", f"{id_b}-PBMC1"]
+                    tn_sel = st.selectbox("Selecionar Amostra Celular Viável (-TN ou -PBMCN)", lista_tn)
                     suf_tn = tn_sel.split("-")[-1]
-                    c1, c2, c3 = st.columns(3)
-                    pass_en = c1.number_input("Passagem (-EN)", 1, 30, int(dp_am.get("passagem", 3)) if str(dp_am.get("passagem", "")).isdigit() else 3)
-                    n_frz = c2.number_input("Ampolas (-FN)", 1, 20, int(dp_am.get("n_criotubos", 3)) if str(dp_am.get("n_criotubos", "")).isdigit() else 3)
-                    viab_qc = c3.slider("Viabilidade Pós-Crio (%)", 0, 100, int(float(dp_am.get("viabilidade_tripan", 92))) if str(dp_am.get("viabilidade_tripan", "")).replace(".", "").isdigit() else 92)
 
-                    if st.button(f"Registrar {tn_sel}-C, {tn_sel}-E{pass_en} e {tn_sel}-F1..F{n_frz}", type="primary"):
+                    c1, c2, c3 = st.columns(3)
+                    pass_en = c1.number_input("Passagem do Congelamento (-EN)", 0, 30, int(dp_am.get("passagem", 3)) if str(dp_am.get("passagem", "")).isdigit() else 3)
+                    n_frz = c2.number_input("Nº de Criotubos Gerados (-FN)", 1, 20, int(dp_am.get("n_criotubos", 3)) if str(dp_am.get("n_criotubos", "")).isdigit() else 3)
+                    viab_qc = c3.slider("Viabilidade Pós-Descongelamento (%)", 0, 100, int(float(dp_am.get("viabilidade_tripan", 92))) if str(dp_am.get("viabilidade_tripan", "")).replace(".", "").isdigit() else 92)
+
+                    c4, c5, c6, c7 = st.columns(4)
+                    dens_in = c4.text_input("Células / Domos por Criotubo", value="1.5x10^6 cél/mL (4 domos)" if "T" in suf_tn else "5.0x10^6 PBMC/mL")
+                    vol_in = c5.text_input("Volume por Criotubo", value="1.0 mL (Recovery / 10% DMSO)")
+                    eq_frio = c6.selectbox("Refrigerador de Destino", ["Ultrafreezer -80°C (Transição Mr. Frosty)", "Criogenia -150°C / N2 Líquido (Definitivo)", "Freezer -20°C (Extração Ácidos Nucleicos)"])
+                    loc_caixa = c7.text_input("Endereçamento na Criocaixa", value=f"Freezer-01 / Rack-A / Caixa-PDO / {suf_tn}")
+
+                    if st.button(f"Registrar {tn_sel}-C, {tn_sel}-E{pass_en} e Congelar {tn_sel}-F1..F{n_frz}", type="primary"):
                         for id_l, et_l, ps_l, st_l in [(f"{tn_sel}-C", "Cultivo", 0, "Em Cultivo (-C)"), (f"{tn_sel}-E{pass_en}", "Estabelecida", int(pass_en), "Estabelecida (-EN)")]:
                             if not fetch_one("SELECT 1 FROM linhagens_pdo WHERE id_linhagem = :id", {"id": id_l}):
-                                run_sql("INSERT INTO linhagens_pdo VALUES (:idl, :ida, :idp, :base, :et, :ps, :st, 'Matrigel + WENR', 'Viável', :resp, :dt)", {"idl": id_l, "ida": tn_sel, "idp": id_b, "base": suf_tn, "et": et_l, "ps": ps_l, "st": st_l, "resp": st.session_state.username, "dt": datetime.now().strftime("%d/%m/%Y")})
+                                run_sql(
+                                    "INSERT INTO linhagens_pdo VALUES (:idl, :ida, :idp, :base, :et, :ps, :st, :mm, 'Viável', :resp, :dt)",
+                                    {"idl": id_l, "ida": tn_sel, "idp": id_b, "base": suf_tn, "et": et_l, "ps": ps_l, "st": st_l, "mm": "Matrigel GFR + WENR" if "T" in suf_tn else "RPMI + IL-2", "resp": st.session_state.username, "dt": datetime.now().strftime("%d/%m/%Y")},
+                                )
                         for i_f in range(1, int(n_frz) + 1):
                             id_f = f"{tn_sel}-F{i_f}"
                             if not fetch_one("SELECT 1 FROM ampolas_congeladas WHERE id_frozen = :id", {"id": id_f}):
-                                run_sql("INSERT INTO ampolas_congeladas VALUES (:idf, :ide, :idp, :base, :na, :ps, '1.5x10^6 cél/mL', :vb, :qc, :resp, :dt)", {"idf": id_f, "ide": f"{tn_sel}-E{pass_en}", "idp": id_b, "base": suf_tn, "na": i_f, "ps": int(pass_en), "vb": float(viab_qc), "qc": "Qualificada" if viab_qc >= 80 else "Manutenção", "resp": st.session_state.username, "dt": datetime.now().strftime("%d/%m/%Y")})
+                                run_sql(
+                                    """INSERT INTO ampolas_congeladas 
+                                       (id_frozen, id_estabelecida, id_p, codigo_base_tn, numero_ampola, passagem_congelamento, densidade, viabilidade_pos_descong, qualificada_ensaio, responsavel, data_congelamento,
+                                        volume_criotubo_ml, equipamento_frio, localizacao_criocaixa)
+                                       VALUES (:idf, :ide, :idp, :base, :na, :ps, :dn, :vb, :qc, :resp, :dt, :vml, :eqf, :cx)""",
+                                    {
+                                        "idf": id_f, "ide": f"{tn_sel}-E{pass_en}", "idp": id_b, "base": suf_tn, "na": i_f,
+                                        "ps": int(pass_en), "dn": dens_in, "vb": float(viab_qc),
+                                        "qc": "Qualificada (≥80%)" if viab_qc >= 80 else "Manutenção",
+                                        "resp": st.session_state.username, "dt": datetime.now().strftime("%d/%m/%Y"),
+                                        "vml": vol_in, "eqf": eq_frio, "cx": f"{loc_caixa}-Pos{i_f}",
+                                    },
+                                )
                         run_sql("UPDATE pacientes_final SET status_geral = 'Criopreservada (-FN)' WHERE id_p = :id", {"id": id_b})
                         st.rerun()
+
+                    st.dataframe(
+                        fetch_df(
+                            'SELECT id_frozen AS "ID Criotubo (-FN)", id_estabelecida AS "Origem (-EN)", densidade AS "Células/Tubo", volume_criotubo_ml AS "Volume", equipamento_frio AS "Refrigerador", localizacao_criocaixa AS "Criocaixa", viabilidade_pos_descong AS "Viabilidade (%)" FROM ampolas_congeladas WHERE id_p = :id',
+                            {"id": id_b},
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
                 elif st.session_state.aba_amostra == "3. Grades (-FN & -GN)":
                     tumores_tn = fetch_all("SELECT id_amostra FROM amostras_biobanco WHERE id_p = :id AND prefixo_tipo = 'T' ORDER BY numero_tubo", {"id": id_b})
@@ -1513,9 +1885,12 @@ else:
                     ct_end_p = dp_am.get("ct_endo", "20.00")
                     linhas_g = []
                     for nome_sig, lista_genes_sig in PAINEL_57_GENES_ASSINATURAS.items():
-                        ct_padrao_via = CT_MEDIANA_POR_ASSINATURA[nome_sig]
                         for gene_h in lista_genes_sig:
-                            g_tup = g_map_pdf.get(gene_h, (ct_padrao_via, ct_padrao_via, ct_padrao_via))
+                            ct_padrao_gene = CT_MEDIANO_INDIVIDUAL_57_GENES.get(
+                                gene_h,
+                                CT_MEDIANA_POR_ASSINATURA.get(nome_sig, "24.62"),
+                            )
+                            g_tup = g_map_pdf.get(gene_h, (ct_padrao_gene, ct_padrao_gene, ct_padrao_gene))
                             linhas_g.append({
                                 "ID (-GN)": f"{tn_base}-G1-{gene_h}",
                                 "N": 1,
@@ -1656,6 +2031,17 @@ else:
             st.error("Restrito ao Administrador.")
         else:
             st.subheader("Governança")
+            if st.button("Reset", type="secondary"):
+                for tb_del in [
+                    "predicoes_ia_final", "ensaios_farmaco_genetico", "ampolas_congeladas",
+                    "linhagens_pdo", "amostras_biobanco", "analises_multibiotipo_futuro",
+                    "submissao_paciente_detalhada", "config_acompanhamento_medico",
+                    "mensagens_acompanhamento", "pacientes_final",
+                ]:
+                    run_sql(f"DELETE FROM {tb_del}")
+                st.session_state.id_ativo = "OS-001"
+                st.success("Banco de pacientes zerado! O próximo paciente cadastrado será o OS-001.")
+                st.rerun()
             t_tok, t_ia, t_mod, t_log, t_usr = st.tabs([
                 "Chaves (5 Perfis)",
                 "Liberar Relatórios de Outras IAs",
@@ -1692,3 +2078,5 @@ else:
 
             with t_usr:
                 st.dataframe(fetch_df('SELECT username AS "Usuário", email AS "Gmail", role AS "Perfil", paciente_vinculado AS "ID Vinculado" FROM usuarios_final ORDER BY role, username'), use_container_width=True, hide_index=True)
+    elif st.session_state.nav_curto == "Sobre":
+        renderizar_pagina_sobre()
